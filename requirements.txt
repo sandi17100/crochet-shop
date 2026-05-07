@@ -1,5 +1,7 @@
-Flask==3.0.0
+Flask
 Flask-Login
-Flask-WTF==1.2.1
 Werkzeug
-gunicorn
+Flask-SQLAlchemy
+SQLAlchemy
+psycopg2-binary
+cloudinary
