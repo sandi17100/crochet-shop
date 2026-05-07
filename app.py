@@ -3,6 +3,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from decimal import Decimal
+from flask_sqlalchemy import SQLAlchemy
 import sqlite3
 import json
 import os
@@ -10,6 +11,9 @@ from datetime import datetime
 
 
 app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+db = SQLAlchemy(app)
 app.secret_key = os.environ.get('SECRET_KEY', 'sandy-crochet-2026-super-secret-key-change-production!')
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
