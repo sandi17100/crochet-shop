@@ -4,7 +4,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from decimal import Decimal
 from flask_sqlalchemy import SQLAlchemy
-import sqlite3
 import json
 import os
 from datetime import datetime
@@ -31,67 +30,35 @@ def allowed_file(filename):
 
 
 # ---------------- DATABASE ----------------
-def get_db():
-    conn = sqlite3.connect("sandy_crochet.db", detect_types=sqlite3.PARSE_DECLTYPES)
-    conn.row_factory = sqlite3.Row
-    return conn
+class Product(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    image = db.Column(db.Text)
+    images = db.Column(db.Text)
+    stock = db.Column(db.Integer, default=0)
+    category = db.Column(db.String(100), default="amigurumi")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
-def init_db():
-    with app.app_context():
-        db = get_db()
-        cursor = db.cursor()
-       
-        # Products table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS products (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                description TEXT NOT NULL,
-                price REAL NOT NULL,
-                image TEXT,
-                images TEXT,
-                stock INTEGER DEFAULT 0,
-                category TEXT DEFAULT 'amigurumi',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-       
-        # Orders table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS orders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                email TEXT NOT NULL,
-                phone TEXT,
-                address TEXT NOT NULL,
-                items TEXT NOT NULL,
-                total REAL NOT NULL,
-                status TEXT DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-       
-        # Admins table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS admins (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-       
-        # Insert default admin
-        cursor.execute("SELECT COUNT(*) FROM admins")
-        if cursor.fetchone()[0] == 0:
-            pwd_hash = generate_password_hash('crochet123')
-            cursor.execute("INSERT INTO admins (username, password_hash) VALUES (?, ?)",
-                         ('sandy', pwd_hash))
-       
-        db.commit()
-        db.close()
+class Order(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    email = db.Column(db.String(200), nullable=False)
+    phone = db.Column(db.String(50))
+    address = db.Column(db.Text, nullable=False)
+    items = db.Column(db.Text, nullable=False)
+    total = db.Column(db.Float, nullable=False)
+    status = db.Column(db.String(50), default="pending")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+
+class Admin(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(100), unique=True, nullable=False)
+    password_hash = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ---------------- MODELS ----------------
 class AdminUser(UserMixin):
@@ -99,139 +66,126 @@ class AdminUser(UserMixin):
         self.id = id
         self.username = username
 
+def init_db():
+    with app.app_context():
+        db.create_all()
+
+        admin = Admin.query.filter_by(username="sandy").first()
+        if not admin:
+            admin = Admin(
+                username="sandy",
+                password_hash=generate_password_hash("crochet123")
+            )
+            db.session.add(admin)
+            db.session.commit()
+
+
+
 
 @login_manager.user_loader
 def load_user(user_id):
-    conn = get_db()
-    user = conn.execute("SELECT id, username FROM admins WHERE id = ?", (user_id,)).fetchone()
-    conn.close()
+    user = Admin.query.get(int(user_id))
     if user:
-        return AdminUser(user['id'], user['username'])
+        return AdminUser(user.id, user.username)
     return None
 
-
 def get_products():
-    conn = get_db()
-    products = conn.execute("SELECT * FROM products WHERE stock > 0 ORDER BY created_at DESC").fetchall()
-    conn.close()
-    return products
+    return Product.query.filter(Product.stock > 0).order_by(Product.created_at.desc()).all()
 
 
 def get_all_products():
-    conn = get_db()
-    products = conn.execute("SELECT * FROM products ORDER BY created_at DESC").fetchall()
-    conn.close()
-    return products
+    return Product.query.order_by(Product.created_at.desc()).all()
 
 
 def get_order_by_id(order_id):
-    conn = get_db()
-    order = conn.execute(
-        "SELECT * FROM orders WHERE id = ?",
-        (order_id,)
-    ).fetchone()
-    conn.close()
-    return order
+    return Order.query.get(order_id)
 
 
 def get_product(product_id):
-    conn = get_db()
-    product = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
-    conn.close()
-    return product
+    return Product.query.get(product_id)
 
 
 def add_product(name, description, price, image, images, stock, category='amigurumi'):
-    conn = get_db()
-    conn.execute("""
-        INSERT INTO products
-        (name, description, price, image, images, stock, category)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """,
-    (
-        name,
-        description,
-        float(price),
-        image,
-        json.dumps(images),
-        stock,
-        category
-    ))
-    conn.commit()
-    conn.close()
+    product = Product(
+        name=name,
+        description=description,
+        price=float(price),
+        image=image,
+        images=json.dumps(images),
+        stock=stock,
+        category=category
+    )
+    db.session.add(product)
+    db.session.commit()
 
 
 def update_product(product_id, name, description, price, image, stock):
-    conn = get_db()
-    conn.execute("UPDATE products SET name=?, description=?, price=?, image=?, stock=? WHERE id=?",
-                (name, description, float(price), image, stock, product_id))
-    conn.commit()
-    conn.close()
+    product = Product.query.get(product_id)
+    if product:
+        product.name = name
+        product.description = description
+        product.price = float(price)
+        product.image = image
+        product.stock = stock
+        db.session.commit()
 
 
 def delete_product(product_id):
-    conn = get_db()
-    conn.execute("DELETE FROM products WHERE id=?", (product_id,))
-    conn.commit()
-    conn.close()
+    product = Product.query.get(product_id)
+    if product:
+        db.session.delete(product)
+        db.session.commit()
 
 
 # ✅ FIXED: Convert Decimal to float for SQLite
 def save_order(name, email, phone, address, items_json, total):
-    conn = get_db()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        INSERT INTO orders (name, email, phone, address, items, total)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (name, email, phone, address, items_json, float(total)))
-
-    conn.commit()
-    order_id = cursor.lastrowid
-    conn.close()
-    return order_id
+    order = Order(
+        name=name,
+        email=email,
+        phone=phone,
+        address=address,
+        items=items_json,
+        total=float(total)
+    )
+    db.session.add(order)
+    db.session.commit()
+    return order.id
 
 
 def get_all_orders():
-    conn = get_db()
-    orders = conn.execute("SELECT * FROM orders ORDER BY created_at DESC").fetchall()
-    conn.close()
-    return orders
+    return Order.query.order_by(Order.created_at.desc()).all()
 
 
 def update_order_status(order_id, status):
-    conn = get_db()
-    conn.execute(
-        "UPDATE orders SET status = ? WHERE id = ?",
-        (status, order_id)
-    )
-    conn.commit()
-    conn.close()
+    order = Order.query.get(order_id)
+    if order:
+        order.status = status
+        db.session.commit()
 
 
 # ---------------- CART FUNCTIONS ----------------
 def add_item_to_cart(product_id):
     product = get_product(product_id)
-    if not product or product['stock'] <= 0:
+    if not product or product.stock <= 0:
         return False
 
-
     cart = session.get("cart", [])
+
     for item in cart:
         if item["id"] == product_id:
-            if item["quantity"] < product['stock']:
+            if item["quantity"] < product.stock:
                 item["quantity"] += 1
             session["cart"] = cart
             return True
 
-
     cart.append({
         "id": product_id,
-        "name": product['name'],
-        "price": float(product['price']),
+        "name": product.name,
+        "price": float(product.price),
         "quantity": 1,
-        "image": product['image']
+        "image": product.image
     })
+
     session["cart"] = cart
     return True
 
@@ -267,20 +221,17 @@ def product(product_id):
         flash("Product not found", "error")
         return redirect(url_for("index"))
 
-    product = dict(product)
+    images = []
 
-    # fallback safety
-    product_images = product.get("images")
-
-    if product_images:
+    if product.images:
         try:
-            product["images"] = json.loads(product_images)
+            images = json.loads(product.images)
         except:
-            product["images"] = product_images.split(",")
-    else:
-        product["images"] = []
+            images = product.images.split(",")
 
-    return render_template("product.html", product=product)
+    return render_template("product.html",
+                           product=product,
+                           images=images)
 
 
 @app.route("/add_to_cart/<int:product_id>")
@@ -367,13 +318,11 @@ def admin_login():
         password = request.form.get("password")
 
 
-        conn = get_db()
-        admin = conn.execute("SELECT * FROM admins WHERE username = ?", (username,)).fetchone()
-        conn.close()
+        admin = Admin.query.filter_by(username=username).first()
 
 
-        if admin and check_password_hash(admin['password_hash'], password):
-            login_user(AdminUser(admin['id'], admin['username']))
+        if admin and check_password_hash(admin.password_hash, password):
+            login_user(AdminUser(admin.id, admin.username))
             flash("Welcome back, Sandy! 👋", "success")
             return redirect(url_for("admin_dashboard"))
         flash("Invalid username or password", "error")
@@ -579,14 +528,11 @@ def admin_orders():
 def admin_order_detail(order_id):
     order = get_order_by_id(order_id)
 
-
     if not order:
         flash("Order not found", "danger")
         return redirect(url_for("admin_orders"))
 
-
-    order_items = json.loads(order["items"])
-
+    order_items = json.loads(order.items)
 
     return render_template(
         "admin_orders.html",
@@ -594,7 +540,6 @@ def admin_order_detail(order_id):
         order_items=order_items,
         single_order=True
     )
-
 
 
 @app.route("/admin/orders/update_status/<int:order_id>", methods=["POST"])
@@ -620,12 +565,7 @@ def track_order_search():
         order_id = request.form.get("order_id")
         email = request.form.get("email")
 
-        conn = get_db()
-        order = conn.execute(
-            "SELECT * FROM orders WHERE id = ? AND email = ?",
-            (order_id, email)
-        ).fetchone()
-        conn.close()
+        order = Order.query.filter_by(id=int(order_id), email=email).first()
 
         if order:
             return redirect(url_for("track_order", order_id=order_id))
@@ -654,12 +594,5 @@ def track_order(order_id):
 if __name__ == "__main__":
     init_db()
 
-    conn = get_db()
-    columns = conn.execute("PRAGMA table_info(products)").fetchall()
-
-    for col in columns:
-      print(dict(col))
-
-    conn.close()
 
     app.run(debug=True, host='0.0.0.0', port=6050)
