@@ -214,7 +214,7 @@ def index():
 
 
 @app.route("/product/<int:product_id>")
-def product(product_id):
+def product_detail(product_id):
     product = get_product(product_id)
 
     if not product:
@@ -345,7 +345,7 @@ def admin_logout():
 def admin_dashboard():
     orders = get_all_orders()
     products = get_all_products()
-    total_revenue = sum(float(order['total']) for order in orders)  # FIXED: float()
+    total_revenue = sum(float(order.total) for order in orders)  # FIXED: float()
     return render_template("admin_dashboard.html",
                          orders=orders,
                          products=products,
@@ -583,7 +583,7 @@ def track_order(order_id):
         flash("Order not found", "error")
         return redirect(url_for("index"))
 
-    order_items = json.loads(order["items"])
+    order_items = json.loads(order.items)
 
     return render_template(
         "track_order.html",
